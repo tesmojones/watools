@@ -1,0 +1,18 @@
+version: '3.8'
+
+services:
+  watools:
+    build: .
+    container_name: watools
+    restart: unless-stopped
+    ports:
+      - "3456:3456"
+    volumes:
+      - ./data:/app/data
+      - ./public/media:/app/public/media
+    environment:
+      - NODE_ENV=production
+      - PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
+      - PUPPETEER_EXECUTABLE_PATH=/usr/bin/google-chrome-stable
+    # Increase shared memory size for Chrome to prevent crashes
+    shm_size: '1gb'

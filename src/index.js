@@ -1,0 +1,75 @@
+import { initDB, closeDB } from './database.js';
+import { startServer, stopServer } from './server.js';
+import { launchBrowser, closeBrowser } from './browser.js';
+import { exec } from 'child_process';
+
+const PORT = 3456;
+const dashboardOnly = process.argv.includes('--dashboard-only');
+
+async function main() {
+    console.log('');
+    console.log('╔══════════════════════════════════════╗');
+    console.log('║    📱 WATools — Message Logger       ║');
+    console.log('╚══════════════════════════════════════╝');
+    console.log('');
+
+    // Initialize database
+    initDB();
+
+    // Start Express server
+    await startServer(PORT);
+
+    // Auto-open dashboard in default browser
+    if (!dashboardOnly) {
+        console.log('📊 Opening dashboard in default browser...');
+        // Use 'open' for macOS, 'xdg-open' for Linux if needed, but user is on Mac.
+        const startCommand = process.platform === 'darwin' ? 'open' : 'xdg-open';
+        exec(`${startCommand} http://localhost:${PORT}`, (err) => {
+            if (err) console.error('⚠️ Failed to auto-open dashboard:', err.message);
+        });
+    }
+
+    if (dashboardOnly) {
+        console.log('');
+        console.log('📊 Dashboard-only mode');
+        console.log(`   Open http://localhost:${PORT} to view your logged messages`);
+        console.log('');
+    } else {
+        // Launch browser with WhatsApp Web
+        console.log('');
+        await launchBrowser();
+        console.log('');
+        console.log('═══════════════════════════════════════');
+        console.log('  ✅ Everything is running!');
+        console.log('  📱 Use the Chrome window to browse WhatsApp');
+        console.log(`  📊 Dashboard: http://localhost:${PORT}`);
+        console.log('  🛑 Press Ctrl+C to stop');
+        console.log('═══════════════════════════════════════');
+        console.log('');
+    }
+}
+
+// Graceful shutdown
+async function shutdown() {
+    console.log('');
+    console.log('🛑 Shutting down...');
+    await closeBrowser();
+    await stopServer();
+    closeDB();
+    console.log('👋 Goodbye!');
+    process.exit(0);
+}
+
+process.on('SIGINT', shutdown);
+process.on('SIGTERM', shutdown);
+process.on('uncaughtException', (err) => {
+    console.error('❌ Uncaught exception:', err);
+});
+process.on('unhandledRejection', (err) => {
+    console.error('❌ Unhandled rejection:', err);
+});
+
+main().catch((err) => {
+    console.error('❌ Fatal error:', err);
+    shutdown();
+});

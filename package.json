@@ -1,0 +1,19 @@
+{
+  "name": "watools",
+  "version": "1.0.0",
+  "description": "Safe WhatsApp message logger using browser automation",
+  "main": "src/index.js",
+  "type": "module",
+  "scripts": {
+    "start": "node src/index.js",
+    "dashboard": "node src/index.js --dashboard-only"
+  },
+  "dependencies": {
+    "better-sqlite3": "^11.0.0",
+    "cheerio": "^1.2.0",
+    "express": "^4.21.0",
+    "puppeteer": "^23.0.0",
+    "puppeteer-extra": "^3.3.6",
+    "puppeteer-extra-plugin-stealth": "^2.11.2"
+  }
+}

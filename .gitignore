@@ -1,0 +1,5 @@
+node_modules/
+browser-data/
+data/
+*.db
+.DS_Store

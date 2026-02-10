@@ -1,0 +1,483 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>WATools — Message Logger Dashboard</title>
+  <meta name="description" content="Browse and search your logged WhatsApp messages">
+  <link rel="stylesheet" href="/style.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+</head>
+
+<body>
+
+
+  <div class="app">
+    <!-- Sidebar -->
+    <aside class="sidebar" id="sidebar">
+      <div class="sidebar-header">
+        <div class="header-top">
+          <h1 class="logo">
+            <span class="logo-icon">📱</span>
+            <span>WATools</span>
+          </h1>
+
+        </div>
+        <div class="stats" id="stats">
+          <span class="stat-badge" id="statChats">0 chats</span>
+          <span class="stat-badge" id="statMessages">0 msgs</span>
+        </div>
+      </div>
+
+      <div class="search-box">
+        <svg class="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <circle cx="11" cy="11" r="8" />
+          <path d="m21 21-4.35-4.35" />
+        </svg>
+        <input type="text" id="searchInput" placeholder="Search messages..." autocomplete="off">
+      </div>
+
+      <div class="chat-list" id="chatList">
+        <div class="empty-state">
+          <p>No chats logged yet</p>
+          <p class="hint">Open WhatsApp Web in the browser window and browse your chats</p>
+        </div>
+      </div>
+    </aside>
+
+    <!-- Main content -->
+    <main class="main" id="main">
+      <!-- Welcome screen -->
+      <div class="welcome" id="welcomeScreen">
+        <div class="welcome-content">
+          <div class="welcome-icon">💬</div>
+          <h2>Welcome to WATools</h2>
+          <p>Your WhatsApp messages are being logged automatically.</p>
+          <p>Select a chat from the sidebar to view messages, or use search to find specific messages.</p>
+          <div class="welcome-tips">
+            <div class="tip">
+              <span class="tip-icon">📱</span>
+              <span>Browse chats in the WhatsApp Web window</span>
+            </div>
+            <div class="tip">
+              <span class="tip-icon">💾</span>
+              <span>Messages are saved as you open each chat</span>
+            </div>
+            <div class="tip">
+              <span class="tip-icon">🔍</span>
+              <span>Search across all logged messages instantly</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Chat view -->
+      <div class="chat-view" id="chatView" style="display: none;">
+        <div class="chat-header" id="chatHeader">
+          <button class="back-btn" id="backBtn" title="Back to chat list">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M19 12H5M12 19l-7-7 7-7" />
+            </svg>
+          </button>
+          <div class="chat-header-info">
+            <h2 id="chatTitle">Chat Name</h2>
+            <span class="chat-meta" id="chatMeta"></span>
+          </div>
+          <button id="syncBtn" class="icon-btn" title="Sync this chat" style="margin-right: 8px;">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path
+                d="M21.5 2v6h-6M2.5 22v-6h6M2 12c0-4.97 4.03-9 9-9c4.36 0 7.97 3.11 8.8 7.23M22 12c0 4.97-4.03 9-9 9c-4.36 0-7.97-3.11-8.8-7.23" />
+            </svg>
+          </button>
+          <button class="export-btn" id="exportBtn" title="Export chat">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3" />
+            </svg>
+            Export
+          </button>
+        </div>
+        <div class="messages" id="messageList"></div>
+      </div>
+
+      <!-- Search results -->
+      <div class="search-results" id="searchResults" style="display: none;">
+        <div class="search-header">
+          <h2>Search Results</h2>
+          <span class="result-count" id="resultCount"></span>
+        </div>
+        <div class="search-result-list" id="searchResultList"></div>
+      </div>
+    </main>
+  </div>
+
+  <script>
+    // ─── State ───
+    let currentChatId = null;
+    let searchTimeout = null;
+    let pollingInterval = null;
+
+    // ─── DOM Elements ───
+    const chatList = document.getElementById('chatList');
+    const messageList = document.getElementById('messageList');
+    const searchInput = document.getElementById('searchInput');
+    const welcomeScreen = document.getElementById('welcomeScreen');
+    const chatView = document.getElementById('chatView');
+    const searchResults = document.getElementById('searchResults');
+    const chatTitle = document.getElementById('chatTitle');
+    const chatMeta = document.getElementById('chatMeta');
+    const backBtn = document.getElementById('backBtn');
+    const exportBtn = document.getElementById('exportBtn');
+    const syncBtn = document.getElementById('syncBtn');
+    const statChats = document.getElementById('statChats');
+    const statMessages = document.getElementById('statMessages');
+
+    // ─── API calls ───
+    async function fetchChats() {
+      const res = await fetch('/api/chats');
+      return res.json();
+    }
+
+    async function fetchMessages(chatId) {
+      const res = await fetch('/api/messages/' + chatId);
+      return res.json();
+    }
+
+    async function fetchSearch(query) {
+      const res = await fetch('/api/search?q=' + encodeURIComponent(query));
+      return res.json();
+    }
+
+    async function fetchStats() {
+      const res = await fetch('/api/stats');
+      return res.json();
+    }
+
+    async function triggerSync(chatName) {
+      const res = await fetch('/api/sync', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ chatName })
+      });
+      return res.json();
+    }
+
+    // ─── Render Functions ───
+    function renderChatList(chats) {
+      if (chats.length === 0) {
+        chatList.innerHTML = `
+          <div class="empty-state">
+            <p>No chats logged yet</p>
+            <p class="hint">Open WhatsApp Web in the browser window and browse your chats</p>
+          </div>`;
+        return;
+      }
+
+      chatList.innerHTML = chats.map(chat => `
+        <div class="chat-item ${chat.id === currentChatId ? 'active' : ''}"
+             data-chat-id="${chat.id}" onclick="selectChat(${chat.id}, '${escapeAttr(chat.name)}')">
+          <div class="chat-avatar">${getAvatar(chat.name)}</div>
+          <div class="chat-info">
+            <div class="chat-name">${escapeHtml(chat.name)}</div>
+            <div class="chat-count">${chat.message_count} messages</div>
+          </div>
+        </div>
+      `).join('');
+    }
+
+
+    function renderMessages(messages) {
+      if (messages.length === 0) {
+        messageList.innerHTML = '<div class="empty-state"><p>No messages found</p></div>';
+        return;
+      }
+
+      let lastDate = '';
+      const html = messages.map(msg => {
+        let dateHeader = '';
+        const msgDate = msg.timestamp ? msg.timestamp.split(',')[0] : '';
+        if (msgDate && msgDate !== lastDate) {
+          lastDate = msgDate;
+          dateHeader = `<div class="date-separator"><span>${escapeHtml(msgDate)}</span></div>`;
+        }
+
+        const bubbleClass = msg.is_outgoing ? 'bubble-out' : 'bubble-in';
+        const typeIcon = getTypeIcon(msg.type);
+
+        let contentHtml = '';
+        if (msg.type === 'image' && msg.media_url) {
+          contentHtml = `<div class="msg-image"><img src="${escapeAttr(msg.media_url)}" loading="lazy" /></div>`;
+          if (msg.content && msg.content !== '[Image]') {
+            contentHtml += `<div class="msg-caption">${parseContent(msg.content)}</div>`;
+          }
+        } else {
+          contentHtml = parseContent(msg.content || '');
+        }
+
+        return `${dateHeader}
+          <div class="message ${bubbleClass}">
+            <div class="bubble">
+              ${!msg.is_outgoing ? `<div class="msg-sender">${escapeHtml(msg.sender || '')}</div>` : ''}
+              ${typeIcon && msg.type !== 'image' ? `<span class="msg-type-icon">${typeIcon}</span>` : ''}
+              <div class="msg-content">${contentHtml}</div>
+              <div class="msg-time">${escapeHtml(msg.timestamp || '')}</div>
+            </div>
+          </div>`;
+      }).join('');
+
+      messageList.innerHTML = html;
+      messageList.scrollTop = messageList.scrollHeight;
+
+      // Load previews
+      loadPreviews();
+    }
+
+    // ─── Cache ───
+    const urlMetadataCache = {};
+
+    function getPreviewHtml(meta) {
+      let html = '';
+      if (meta.image) {
+        html += `<div class="preview-image" style="background-image: url('${escapeAttr(meta.image)}')"></div>`;
+      }
+      html += `<div class="preview-info">`;
+      if (meta.title) html += `<h4 class="preview-title">${escapeHtml(meta.title)}</h4>`;
+      if (meta.description) html += `<p class="preview-desc">${escapeHtml(meta.description)}</p>`;
+      try {
+        html += `<span class="preview-domain">${new URL(meta.url).hostname}</span>`;
+      } catch (e) { }
+      html += `</div>`;
+      return `<a href="${escapeAttr(meta.url)}" target="_blank" class="preview-card">${html}</a>`;
+    }
+
+    function parseContent(text) {
+      if (!text) return '';
+      const escaped = escapeHtml(text);
+      // Find URLs (simple regex)
+      const urlRegex = /(https?:\/\/[^\s]+)/g;
+      return escaped.replace(urlRegex, (url) => {
+        if (urlMetadataCache[url]) {
+          if (urlMetadataCache[url].error) return `<a href="${url}" target="_blank" class="msg-link">${url}</a>`;
+          return `<a href="${url}" target="_blank" class="msg-link">${url}</a>${getPreviewHtml(urlMetadataCache[url])}`;
+        }
+        debug('Found URL for preview: ' + url);
+        return `<a href="${url}" target="_blank" class="msg-link">${url}</a><div class="url-preview loading" data-url="${url}"></div>`;
+      });
+    }
+
+    function debug(msg) {
+      // console.log('[Debug]', msg);
+    }
+
+    async function loadPreviews() {
+      const previews = document.querySelectorAll('.url-preview.loading');
+      if (previews.length > 0) debug(`Found ${previews.length} previews to load`);
+
+      for (const el of previews) {
+        el.classList.remove('loading');
+        const url = el.dataset.url;
+        debug(`Processing: ${url}`);
+
+        if (urlMetadataCache[url]) {
+          if (!urlMetadataCache[url].error) el.outerHTML = getPreviewHtml(urlMetadataCache[url]);
+          else el.remove();
+          continue;
+        }
+
+        try {
+          debug(`Fetching API: ${url}`);
+          const res = await fetch(`/api/metadata?url=${encodeURIComponent(url)}`);
+          const meta = await res.json();
+
+          if (meta.error || (!meta.title && !meta.image)) {
+            debug(`API Error/Empty: ${url}`);
+            urlMetadataCache[url] = { error: true };
+            el.remove();
+            continue;
+          }
+
+          debug(`Got Meta: ${meta.title}`);
+          urlMetadataCache[url] = meta;
+          el.outerHTML = getPreviewHtml(meta);
+        } catch (err) {
+          debug(`Fetch Fail: ${err.message}`);
+          console.error('Preview fetch error:', err);
+          urlMetadataCache[url] = { error: true };
+          el.remove();
+        }
+      }
+    }
+
+    function renderSearchResults(results) {
+      const resultCount = document.getElementById('resultCount');
+      const searchResultList = document.getElementById('searchResultList');
+
+      resultCount.textContent = results.length + ' result' + (results.length !== 1 ? 's' : '');
+
+      if (results.length === 0) {
+        searchResultList.innerHTML = '<div class="empty-state"><p>No messages found</p></div>';
+        return;
+      }
+
+      searchResultList.innerHTML = results.map(msg => `
+        <div class="search-result-item" onclick="selectChat(${msg.chat_id}, '${escapeAttr(msg.chat_name)}')">
+          <div class="search-result-header">
+            <span class="search-result-chat">${escapeHtml(msg.chat_name)}</span>
+            <span class="search-result-sender">${escapeHtml(msg.sender || '')}</span>
+            <span class="search-result-time">${escapeHtml(msg.timestamp || '')}</span>
+          </div>
+          <div class="search-result-content">${highlightSearch(msg.content || '', searchInput.value)}</div>
+        </div>
+      `).join('');
+    }
+
+    // ─── Event Handlers ───
+    async function selectChat(chatId, chatName) {
+      currentChatId = chatId;
+      chatTitle.textContent = chatName;
+      welcomeScreen.style.display = 'none';
+      searchResults.style.display = 'none';
+      chatView.style.display = 'flex';
+
+      // Update active state
+      document.querySelectorAll('.chat-item').forEach(el => {
+        el.classList.toggle('active', parseInt(el.dataset.chatId) === chatId);
+      });
+
+      const messages = await fetchMessages(chatId);
+      chatMeta.textContent = messages.length + ' messages';
+      renderMessages(messages);
+    }
+
+    backBtn.addEventListener('click', () => {
+      currentChatId = null;
+      chatView.style.display = 'none';
+      searchResults.style.display = 'none';
+      welcomeScreen.style.display = 'flex';
+      document.querySelectorAll('.chat-item').forEach(el => el.classList.remove('active'));
+    });
+
+    searchInput.addEventListener('input', (e) => {
+      clearTimeout(searchTimeout);
+      const query = e.target.value.trim();
+
+      if (!query) {
+        searchResults.style.display = 'none';
+        if (currentChatId) {
+          chatView.style.display = 'flex';
+        } else {
+          welcomeScreen.style.display = 'flex';
+        }
+        return;
+      }
+
+      searchTimeout = setTimeout(async () => {
+        welcomeScreen.style.display = 'none';
+        chatView.style.display = 'none';
+        searchResults.style.display = 'flex';
+
+        const results = await fetchSearch(query);
+        renderSearchResults(results);
+      }, 300);
+    });
+
+    exportBtn.addEventListener('click', async () => {
+      if (!currentChatId) return;
+      const messages = await fetchMessages(currentChatId);
+      const chatName = chatTitle.textContent;
+
+      const text = messages.map(msg => {
+        const direction = msg.is_outgoing ? 'You' : (msg.sender || chatName);
+        return `[${msg.timestamp || ''}] ${direction}: ${msg.content || ''}`;
+      }).join('\n');
+
+      const blob = new Blob([text], { type: 'text/plain' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = chatName.replace(/[^a-zA-Z0-9]/g, '_') + '_export.txt';
+      a.click();
+      URL.revokeObjectURL(url);
+    });
+
+    syncBtn.addEventListener('click', async () => {
+      if (!currentChatId) return;
+
+      syncBtn.classList.add('spinning');
+      const chatName = chatTitle.textContent;
+
+      try {
+        const res = await triggerSync(chatName);
+
+        if (res.success) {
+          // Success feedback - maybe a toast or just console
+          console.log('Sync success', res);
+        } else if (res.error === 'Chat mismatch') {
+          alert(`Sync failed: Please open "${chatName}" in WhatsApp Web first.\n(Currently open: "${res.actual || 'none'}")`);
+        } else {
+          console.error('Sync failed', res);
+          alert('Sync failed: ' + (res.error || 'Unknown error'));
+        }
+      } catch (e) {
+        console.error('Sync error', e);
+        alert('Sync error: ' + e.message);
+      } finally {
+        setTimeout(() => syncBtn.classList.remove('spinning'), 1000);
+      }
+    });
+
+    // ─── Helpers ───
+    function escapeHtml(str) {
+      const div = document.createElement('div');
+      div.textContent = str;
+      return div.innerHTML;
+    }
+
+    function escapeAttr(str) {
+      return str.replace(/'/g, "\\'").replace(/"/g, '&quot;');
+    }
+
+    function getAvatar(name) {
+      if (!name) return '💬';
+      return name.charAt(0).toUpperCase();
+    }
+
+    function getTypeIcon(type) {
+      const icons = { image: '🖼️', audio: '🎵', video: '🎬', document: '📄', sticker: '😀' };
+      return icons[type] || '';
+    }
+
+    function highlightSearch(text, query) {
+      if (!query) return escapeHtml(text);
+      const escaped = escapeHtml(text);
+      const regex = new RegExp('(' + query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + ')', 'gi');
+      return escaped.replace(regex, '<mark>$1</mark>');
+    }
+
+    // ─── Polling for updates ───
+    async function refreshData() {
+      try {
+        const [chats, stats] = await Promise.all([fetchChats(), fetchStats()]);
+        renderChatList(chats);
+        statChats.textContent = stats.chatCount + ' chats';
+        statMessages.textContent = stats.messageCount + ' msgs';
+
+        // Refresh current chat if open
+        if (currentChatId && chatView.style.display !== 'none') {
+          const messages = await fetchMessages(currentChatId);
+          chatMeta.textContent = messages.length + ' messages';
+          renderMessages(messages);
+        }
+      } catch (err) {
+        console.error('Refresh error:', err);
+      }
+    }
+
+    // ─── Init ───
+    refreshData();
+    pollingInterval = setInterval(refreshData, 5000); // Refresh every 5 seconds
+  </script>
+</body>
+
+</html>
