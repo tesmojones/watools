@@ -10,6 +10,8 @@ services:
     volumes:
       - ./data:/app/data
       - ./public/media:/app/public/media
+      - ./src:/app/src
+      - ./public:/app/public
     environment:
       - NODE_ENV=production
       - PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
