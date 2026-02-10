@@ -164,7 +164,7 @@ export function startServer(port = 3456) {
     });
 
     return new Promise((resolve) => {
-        server = app.listen(port, () => {
+        server = app.listen(port, '0.0.0.0', () => {
             console.log(`🖥️  Dashboard: http://localhost:${port}`);
             console.log(`📡 API:       http://localhost:${port}/api`);
             resolve(server);
