@@ -266,11 +266,24 @@ export function getInjectionScript() {
 
         observer = new MutationObserver(function() {
           clearTimeout(window.__watools_debounce);
-          window.__watools_debounce = setTimeout(scrapeAndSend, 800);
+          window.__watools_debounce = setTimeout(scrapeAndSend, 300);
         });
 
         observer.observe(target, { childList: true, subtree: true });
         log('Observing messages in real-time');
+
+        // Also watch for scroll (loading old messages by scrolling up)
+        var scrollPanel = mainEl.querySelector('[role="application"]') || mainEl;
+        scrollPanel.addEventListener('scroll', function() {
+          clearTimeout(window.__watools_scroll_debounce);
+          window.__watools_scroll_debounce = setTimeout(scrapeAndSend, 500);
+        }, true);
+        log('Watching for scroll (old message loading)');
+
+        // Periodic scrape every 3s to catch anything missed by observers
+        if (window.__watools_periodic) clearInterval(window.__watools_periodic);
+        window.__watools_periodic = setInterval(scrapeAndSend, 3000);
+
         setTimeout(scrapeAndSend, 500);
       }
 
