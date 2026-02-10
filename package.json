@@ -6,7 +6,8 @@
   "type": "module",
   "scripts": {
     "start": "node src/index.js",
-    "dashboard": "node src/index.js --dashboard-only"
+    "dashboard": "node src/index.js --dashboard-only",
+    "scraper": "node --env-file=.env src/scraper-only.js"
   },
   "dependencies": {
     "better-sqlite3": "^11.0.0",

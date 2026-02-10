@@ -46,29 +46,46 @@ export async function launchBrowser() {
     // ─── Expose bridge function ───
     // This creates window.__watools_saveMessages() in the page context
     // that calls our Node.js function directly — bypassing CSP/CORS
+    const remoteUrl = process.env.REMOTE_API_URL;
+    const apiKey = process.env.API_KEY;
+
     await page.exposeFunction('__watools_saveMessages', async (chatName, messagesJSON) => {
         try {
             const messages = JSON.parse(messagesJSON);
             console.log(`📨 Received ${messages.length} messages from "${chatName}"`);
 
+            // ─── REMOTE MODE: send to cloud API ───
+            if (remoteUrl && apiKey) {
+                const response = await fetch(`${remoteUrl}/api/ingest`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${apiKey}`,
+                    },
+                    body: JSON.stringify({ chatName, messages }),
+                });
+                const result = await response.json();
+                if (result.success) {
+                    console.log(`☁️ Sent ${result.count} messages to cloud (${chatName})`);
+                } else {
+                    console.error('☁️ Cloud ingest error:', result.error);
+                }
+                return JSON.stringify(result);
+            }
+
+            // ─── LOCAL MODE: save to local DB ───
             // Process media files
             for (const msg of messages) {
                 if (msg.mediaData) {
                     try {
-                        // mediaData is "data:image/jpeg;base64,....."
                         const matches = msg.mediaData.match(/^data:([A-Za-z-+\/]+);base64,(.+)$/);
                         if (matches && matches.length === 3) {
                             const ext = matches[1].split('/')[1] || 'jpg';
                             const buffer = Buffer.from(matches[2], 'base64');
-                            // Create simple filename
                             const filename = `img_${Date.now()}_${Math.random().toString(36).substr(2, 5)}.${ext}`;
                             const filepath = join(__dirname, '..', 'public', 'media', filename);
-
                             await writeFile(filepath, buffer);
-
-                            // Update URL to point to our local server
                             msg.mediaUrl = `/media/${filename}`;
-                            // Remove large data before DB insert
                             delete msg.mediaData;
                             console.log(`🖼️ Saved image to ${filename}`);
                         }

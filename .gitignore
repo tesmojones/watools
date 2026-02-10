@@ -3,3 +3,5 @@ browser-data/
 data/
 *.db
 .DS_Store
+.env
+public/media/

@@ -16,5 +16,6 @@ services:
       - NODE_ENV=production
       - PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
       - PUPPETEER_EXECUTABLE_PATH=/usr/bin/google-chrome-stable
+      - API_KEY=inisangatsecretsekaliyak
     # Increase shared memory size for Chrome to prevent crashes
     shm_size: '1gb'

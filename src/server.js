@@ -1,6 +1,7 @@
 import express from 'express';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
+import { writeFile } from 'fs/promises';
 import * as cheerio from 'cheerio';
 import {
     insertMessages,
@@ -12,6 +13,7 @@ import {
 } from './database.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
+const API_KEY = process.env.API_KEY || '';
 
 let server = null;
 
@@ -22,12 +24,12 @@ export function startServer(port = 3456) {
     app.use((req, res, next) => {
         res.header('Access-Control-Allow-Origin', '*');
         res.header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-        res.header('Access-Control-Allow-Headers', 'Content-Type');
+        res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
         if (req.method === 'OPTIONS') return res.sendStatus(200);
         next();
     });
 
-    app.use(express.json({ limit: '10mb' }));
+    app.use(express.json({ limit: '50mb' }));
     app.use(express.static(join(__dirname, '..', 'public')));
 
     // ─── API Routes ───
@@ -154,6 +156,54 @@ export function startServer(port = 3456) {
             res.json(result);
         } catch (err) {
             console.error('Sync failed:', err.message);
+            res.status(500).json({ error: err.message });
+        }
+    });
+
+    // Remote Ingest — receives messages from local scraper
+    app.post('/api/ingest', async (req, res) => {
+        // Validate API key
+        if (!API_KEY) {
+            return res.status(500).json({ error: 'API_KEY not configured on server' });
+        }
+        const authHeader = req.headers.authorization || '';
+        const token = authHeader.replace('Bearer ', '');
+        if (token !== API_KEY) {
+            return res.status(401).json({ error: 'Invalid API key' });
+        }
+
+        try {
+            const { chatName, messages } = req.body;
+            if (!chatName || !messages || !Array.isArray(messages)) {
+                return res.status(400).json({ error: 'Missing chatName or messages' });
+            }
+
+            // Process media (save base64 images to disk)
+            for (const msg of messages) {
+                if (msg.mediaData) {
+                    try {
+                        const matches = msg.mediaData.match(/^data:([A-Za-z-+\/]+);base64,(.+)$/);
+                        if (matches && matches.length === 3) {
+                            const ext = matches[1].split('/')[1] || 'jpg';
+                            const buffer = Buffer.from(matches[2], 'base64');
+                            const filename = `img_${Date.now()}_${Math.random().toString(36).substr(2, 5)}.${ext}`;
+                            const filepath = join(__dirname, '..', 'public', 'media', filename);
+                            await writeFile(filepath, buffer);
+                            msg.mediaUrl = `/media/${filename}`;
+                            delete msg.mediaData;
+                            console.log(`🖼️ Saved image to ${filename}`);
+                        }
+                    } catch (mediaErr) {
+                        console.error('Media processing error:', mediaErr.message);
+                    }
+                }
+            }
+
+            insertMessages(chatName, messages);
+            console.log(`📥 Ingested ${messages.length} messages from "${chatName}" (remote)`);
+            res.json({ success: true, count: messages.length, chatName });
+        } catch (err) {
+            console.error('Ingest error:', err.message);
             res.status(500).json({ error: err.message });
         }
     });
