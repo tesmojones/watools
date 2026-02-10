@@ -2,6 +2,7 @@ import express from 'express';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { writeFile } from 'fs/promises';
+import { createHash } from 'crypto';
 import * as cheerio from 'cheerio';
 import {
     insertMessages,
@@ -30,6 +31,72 @@ export function startServer(port = 3456) {
     });
 
     app.use(express.json({ limit: '50mb' }));
+
+    // ─── Simple Auth ───
+    const AUTH_TOKEN = API_KEY ? createHash('sha256').update(API_KEY).digest('hex').substring(0, 32) : '';
+
+    function parseCookies(req) {
+        const cookies = {};
+        (req.headers.cookie || '').split(';').forEach(c => {
+            const [k, v] = c.trim().split('=');
+            if (k) cookies[k] = v;
+        });
+        return cookies;
+    }
+
+    // Auth middleware — protect dashboard & API (except ingest and POST messages)
+    function authMiddleware(req, res, next) {
+        // Skip auth if no API_KEY is set
+        if (!API_KEY) return next();
+
+        // Allow scraper endpoints without cookie auth
+        if (req.path === '/api/ingest') return next();
+        if (req.path === '/api/messages' && req.method === 'POST') return next();
+
+        // Allow login page and login API
+        if (req.path === '/login' || req.path === '/api/auth/login') return next();
+
+        // Allow static assets (css, js, images)
+        if (req.path.match(/\.(css|js|ico|png|jpg|jpeg|webp|svg|woff2?)$/)) return next();
+
+        // Check auth cookie
+        const cookies = parseCookies(req);
+        if (cookies.watools_auth === AUTH_TOKEN) return next();
+
+        // Not authenticated — redirect to login
+        if (req.path.startsWith('/api/')) {
+            return res.status(401).json({ error: 'Not authenticated' });
+        }
+        return res.redirect('/login');
+    }
+
+    app.use(authMiddleware);
+
+    // Login page
+    app.get('/login', (req, res) => {
+        const cookies = parseCookies(req);
+        if (API_KEY && cookies.watools_auth === AUTH_TOKEN) {
+            return res.redirect('/');
+        }
+        res.send(getLoginPageHtml());
+    });
+
+    // Login API
+    app.post('/api/auth/login', express.urlencoded({ extended: false }), (req, res) => {
+        const { password } = req.body;
+        if (password === API_KEY) {
+            res.setHeader('Set-Cookie', `watools_auth=${AUTH_TOKEN}; HttpOnly; Path=/; Max-Age=2592000; SameSite=Strict`);
+            return res.redirect('/');
+        }
+        res.send(getLoginPageHtml('Wrong password'));
+    });
+
+    // Logout
+    app.get('/logout', (req, res) => {
+        res.setHeader('Set-Cookie', 'watools_auth=; HttpOnly; Path=/; Max-Age=0');
+        res.redirect('/login');
+    });
+
     app.use(express.static(join(__dirname, '..', 'public')));
 
     // ─── API Routes ───
@@ -255,4 +322,108 @@ export function stopServer() {
             resolve();
         }
     });
+}
+
+function getLoginPageHtml(error = '') {
+    return `<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WATools — Login</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            background: #0b141a;
+            color: #e9edef;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+        }
+        .login-card {
+            background: #1f2c33;
+            border-radius: 12px;
+            padding: 40px;
+            width: 100%;
+            max-width: 380px;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.5);
+        }
+        .login-header {
+            text-align: center;
+            margin-bottom: 32px;
+        }
+        .login-header h1 {
+            font-size: 1.5rem;
+            margin-bottom: 8px;
+        }
+        .login-header p {
+            color: #8696a0;
+            font-size: 0.9rem;
+        }
+        .form-group {
+            margin-bottom: 20px;
+        }
+        label {
+            display: block;
+            margin-bottom: 8px;
+            color: #8696a0;
+            font-size: 0.85rem;
+        }
+        input[type="password"] {
+            width: 100%;
+            padding: 12px 16px;
+            background: #111b21;
+            border: 1px solid #2a3942;
+            border-radius: 8px;
+            color: #e9edef;
+            font-size: 1rem;
+            outline: none;
+            transition: border-color 0.2s;
+        }
+        input[type="password"]:focus {
+            border-color: #00a884;
+        }
+        button {
+            width: 100%;
+            padding: 12px;
+            background: #00a884;
+            border: none;
+            border-radius: 8px;
+            color: white;
+            font-size: 1rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+        button:hover { background: #06cf9c; }
+        .error {
+            background: rgba(233, 68, 68, 0.15);
+            color: #e94444;
+            padding: 10px 14px;
+            border-radius: 8px;
+            font-size: 0.9rem;
+            margin-bottom: 16px;
+            text-align: center;
+        }
+    </style>
+</head>
+<body>
+    <div class="login-card">
+        <div class="login-header">
+            <h1>📱 WATools</h1>
+            <p>Enter password to access the dashboard</p>
+        </div>
+        ${error ? '<div class="error">' + error + '</div>' : ''}
+        <form method="POST" action="/api/auth/login">
+            <div class="form-group">
+                <label for="password">Password</label>
+                <input type="password" id="password" name="password" placeholder="Enter API key..." autofocus required>
+            </div>
+            <button type="submit">Login</button>
+        </form>
+    </div>
+</body>
+</html>`;
 }
