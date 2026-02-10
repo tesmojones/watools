@@ -203,14 +203,56 @@ export function getInjectionScript() {
         if (prePlainTs) {
             var preTs = prePlainTs.getAttribute('data-pre-plain-text');
             var tsMatch = preTs.match(/\[(.+?)\]/);
-            if (tsMatch) timestamp = tsMatch[1];
+            if (tsMatch) {
+                var rawTs = tsMatch[1];
+                // Try to parse "HH:MM, M/D/YYYY" or "H:MM AM/PM, M/D/YYYY"
+                var dateTimeMatch = rawTs.match(/^(\d{1,2}[:.\s]\d{2}(?:\s*[APap][Mm])?)(?:,\s*|\s+)(\d{1,2}\/\d{1,2}\/\d{2,4})$/);
+                if (dateTimeMatch) {
+                    var timePart = dateTimeMatch[1];
+                    var datePart = dateTimeMatch[2];
+                    var dateParts = datePart.split('/');
+                    // Could be M/D/YYYY or D/M/YYYY depending on locale
+                    var month = dateParts[0];
+                    var day = dateParts[1];
+                    var year = dateParts[2];
+                    if (year.length === 2) year = '20' + year;
+                    // Parse time (handle 12h or 24h)
+                    var hours = 0, mins = 0;
+                    var ampmMatch = timePart.match(/(\d{1,2})[:.](\d{2})\s*([APap][Mm])/);
+                    if (ampmMatch) {
+                        hours = parseInt(ampmMatch[1]);
+                        mins = parseInt(ampmMatch[2]);
+                        if (/[Pp]/.test(ampmMatch[3]) && hours !== 12) hours += 12;
+                        if (/[Aa]/.test(ampmMatch[3]) && hours === 12) hours = 0;
+                    } else {
+                        var h24Match = timePart.match(/(\d{1,2})[:.](\d{2})/);
+                        if (h24Match) {
+                            hours = parseInt(h24Match[1]);
+                            mins = parseInt(h24Match[2]);
+                        }
+                    }
+                    // Build ISO: YYYY-MM-DDTHH:MM:00
+                    timestamp = year + '-' + month.padStart(2, '0') + '-' + day.padStart(2, '0') + 'T' + String(hours).padStart(2, '0') + ':' + String(mins).padStart(2, '0') + ':00';
+                } else {
+                    timestamp = rawTs;
+                }
+            }
         }
         if (!timestamp) {
+            // Fallback: extract time-only and use today's date
             var allSpans = el.querySelectorAll('span');
             for (var k = allSpans.length - 1; k >= 0; k--) {
                 var spanText = allSpans[k].textContent.trim();
                 if (/^\d{1,2}:\d{2}\s*(AM|PM)?$/i.test(spanText)) {
-                    timestamp = spanText;
+                    var now = new Date();
+                    var fallbackMatch = spanText.match(/(\d{1,2}):(\d{2})\s*([APap][Mm])?/);
+                    if (fallbackMatch) {
+                        var fh = parseInt(fallbackMatch[1]);
+                        var fm = parseInt(fallbackMatch[2]);
+                        if (fallbackMatch[3] && /[Pp]/.test(fallbackMatch[3]) && fh !== 12) fh += 12;
+                        if (fallbackMatch[3] && /[Aa]/.test(fallbackMatch[3]) && fh === 12) fh = 0;
+                        timestamp = now.getFullYear() + '-' + String(now.getMonth()+1).padStart(2,'0') + '-' + String(now.getDate()).padStart(2,'0') + 'T' + String(fh).padStart(2,'0') + ':' + String(fm).padStart(2,'0') + ':00';
+                    }
                     break;
                 }
             }

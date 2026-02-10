@@ -9,16 +9,16 @@ const DB_PATH = join(__dirname, '..', 'data', 'messages.db');
 let db;
 
 export function initDB() {
-    const dataDir = dirname(DB_PATH);
-    if (!existsSync(dataDir)) {
-        mkdirSync(dataDir, { recursive: true });
-    }
+  const dataDir = dirname(DB_PATH);
+  if (!existsSync(dataDir)) {
+    mkdirSync(dataDir, { recursive: true });
+  }
 
-    db = new Database(DB_PATH);
-    db.pragma('journal_mode = WAL');
-    db.pragma('foreign_keys = ON');
+  db = new Database(DB_PATH);
+  db.pragma('journal_mode = WAL');
+  db.pragma('foreign_keys = ON');
 
-    db.exec(`
+  db.exec(`
     CREATE TABLE IF NOT EXISTS chats (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       name TEXT NOT NULL,
@@ -68,23 +68,23 @@ export function initDB() {
     END;
   `);
 
-    // Backfill FTS if empty (checks simply by count, crude but effective for single-user dev)
-    const ftsCount = db.prepare('SELECT COUNT(*) as c FROM messages_fts').get().c;
-    const msgCount = db.prepare('SELECT COUNT(*) as c FROM messages').get().c;
-    if (ftsCount < msgCount) {
-        console.log('🔄 Backfilling FTS index...');
-        db.exec(`
+  // Backfill FTS if empty (checks simply by count, crude but effective for single-user dev)
+  const ftsCount = db.prepare('SELECT COUNT(*) as c FROM messages_fts').get().c;
+  const msgCount = db.prepare('SELECT COUNT(*) as c FROM messages').get().c;
+  if (ftsCount < msgCount) {
+    console.log('🔄 Backfilling FTS index...');
+    db.exec(`
           INSERT INTO messages_fts(rowid, content, sender, chat_name)
           SELECT m.id, m.content, m.sender, c.name
           FROM messages m
           JOIN chats c ON m.chat_id = c.id
           WHERE m.id NOT IN (SELECT rowid FROM messages_fts);
         `);
-        console.log('✅ FTS Backfill complete');
-    }
+    console.log('✅ FTS Backfill complete');
+  }
 
-    console.log('✅ Database initialized at', DB_PATH);
-    return db;
+  console.log('✅ Database initialized at', DB_PATH);
+  return db;
 }
 
 // Prepared statements (cached after first call)
@@ -93,71 +93,73 @@ let stmtSelectChat;
 let stmtInsertMsg;
 
 function getStmts() {
-    if (!stmtUpsertChat) {
-        stmtUpsertChat = db.prepare(`
+  if (!stmtUpsertChat) {
+    stmtUpsertChat = db.prepare(`
       INSERT INTO chats (name, type, last_message_at)
       VALUES (?, ?, datetime('now'))
       ON CONFLICT(name) DO UPDATE SET
         last_message_at = datetime('now'),
         type = excluded.type
     `);
-        stmtSelectChat = db.prepare('SELECT id FROM chats WHERE name = ?');
-        stmtInsertMsg = db.prepare(`
+    stmtSelectChat = db.prepare('SELECT id FROM chats WHERE name = ?');
+    stmtInsertMsg = db.prepare(`
       INSERT INTO messages (whatsapp_id, chat_id, sender, content, timestamp, type, is_outgoing, media_url, raw_data)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-      ON CONFLICT(whatsapp_id) DO NOTHING
+      ON CONFLICT(whatsapp_id) DO UPDATE SET
+        timestamp = CASE WHEN excluded.timestamp LIKE '____-__-__T%' THEN excluded.timestamp ELSE timestamp END,
+        media_url = COALESCE(media_url, excluded.media_url)
     `);
-    }
+  }
 }
 
 export function upsertChat(name, type = 'personal') {
-    getStmts();
-    stmtUpsertChat.run(name, type);
-    const row = stmtSelectChat.get(name);
-    return Number(row.id);
+  getStmts();
+  stmtUpsertChat.run(name, type);
+  const row = stmtSelectChat.get(name);
+  return Number(row.id);
 }
 
 export function insertMessages(chatName, messages) {
-    getStmts();
+  getStmts();
 
-    // First upsert the chat OUTSIDE the transaction
-    const chatId = upsertChat(chatName);
+  // First upsert the chat OUTSIDE the transaction
+  const chatId = upsertChat(chatName);
 
-    // Verify chatId is valid
-    if (!chatId || chatId <= 0) {
-        throw new Error('Invalid chatId: ' + chatId + ' for chat: ' + chatName);
+  // Verify chatId is valid
+  if (!chatId || chatId <= 0) {
+    throw new Error('Invalid chatId: ' + chatId + ' for chat: ' + chatName);
+  }
+
+  let inserted = 0;
+
+  const insertMany = db.transaction((msgs) => {
+    for (const msg of msgs) {
+      try {
+        const result = stmtInsertMsg.run(
+          msg.id || null, // whatsapp_id
+          chatId,
+          msg.sender || null,
+          msg.content || null,
+          msg.timestamp || null,
+          msg.type || 'text',
+          msg.isOutgoing ? 1 : 0,
+          msg.mediaUrl || null,
+          msg.rawData || null,
+        );
+        if (result.changes > 0) inserted++;
+      } catch (err) {
+        // Log but don't throw on individual message errors
+        console.error('  ⚠️ Skipping message:', err.message);
+      }
     }
+  });
 
-    let inserted = 0;
-
-    const insertMany = db.transaction((msgs) => {
-        for (const msg of msgs) {
-            try {
-                const result = stmtInsertMsg.run(
-                    msg.id || null, // whatsapp_id
-                    chatId,
-                    msg.sender || null,
-                    msg.content || null,
-                    msg.timestamp || null,
-                    msg.type || 'text',
-                    msg.isOutgoing ? 1 : 0,
-                    msg.mediaUrl || null,
-                    msg.rawData || null,
-                );
-                if (result.changes > 0) inserted++;
-            } catch (err) {
-                // Log but don't throw on individual message errors
-                console.error('  ⚠️ Skipping message:', err.message);
-            }
-        }
-    });
-
-    insertMany(messages);
-    return { chatId, inserted, total: messages.length };
+  insertMany(messages);
+  return { chatId, inserted, total: messages.length };
 }
 
 export function getChats() {
-    return db.prepare(`
+  return db.prepare(`
     SELECT c.*, COUNT(m.id) as message_count
     FROM chats c
     LEFT JOIN messages m ON m.chat_id = c.id
@@ -167,7 +169,7 @@ export function getChats() {
 }
 
 export function getMessages(chatId, limit = 500, offset = 0) {
-    return db.prepare(`
+  return db.prepare(`
     SELECT * FROM messages
     WHERE chat_id = ?
     ORDER BY timestamp ASC, id ASC
@@ -176,31 +178,31 @@ export function getMessages(chatId, limit = 500, offset = 0) {
 }
 
 export function getChatByName(name) {
-    return db.prepare('SELECT * FROM chats WHERE name = ?').get(name);
+  return db.prepare('SELECT * FROM chats WHERE name = ?').get(name);
 }
 
 export function searchMessages(query, limit = 100) {
-    // Use FTS5 for search
-    // We sanitize the query by wrapping it in double quotes for phrase search,
-    // or append * for prefix search on the last word.
-    // For simplicity, we just pass the query. If it fails (syntax error), we fallback or catch.
+  // Use FTS5 for search
+  // We sanitize the query by wrapping it in double quotes for phrase search,
+  // or append * for prefix search on the last word.
+  // For simplicity, we just pass the query. If it fails (syntax error), we fallback or catch.
 
-    // Simple sanitization: remove non-alphanumeric chars that are special in FTS5 usually?
-    // FTS5 allows " AND OR NOT etc.
-    // A simplified approach: treat as exact phrase or words.
+  // Simple sanitization: remove non-alphanumeric chars that are special in FTS5 usually?
+  // FTS5 allows " AND OR NOT etc.
+  // A simplified approach: treat as exact phrase or words.
 
-    // User expectation modification: "hello world" -> match phrase? or match both?
-    // Let's wrap in quotes for "simple string match" behavior closest to LIKE, 
-    // but FTS is word-based.
+  // User expectation modification: "hello world" -> match phrase? or match both?
+  // Let's wrap in quotes for "simple string match" behavior closest to LIKE, 
+  // but FTS is word-based.
 
-    // Let's try standard word matching.
+  // Let's try standard word matching.
 
-    try {
-        // Construct a safe query: split by space, add * to each word for prefix matching
-        // "he wor" -> "he* wor*"
-        const ftsQuery = query.trim().split(/\s+/).map(w => `"${w}"*`).join(' AND ');
+  try {
+    // Construct a safe query: split by space, add * to each word for prefix matching
+    // "he wor" -> "he* wor*"
+    const ftsQuery = query.trim().split(/\s+/).map(w => `"${w}"*`).join(' AND ');
 
-        return db.prepare(`
+    return db.prepare(`
         SELECT m.*, c.name as chat_name
         FROM messages_fts fts
         JOIN messages m ON m.id = fts.rowid
@@ -209,26 +211,26 @@ export function searchMessages(query, limit = 100) {
         ORDER BY m.timestamp DESC
         LIMIT ?
       `).all(ftsQuery, limit);
-    } catch (e) {
-        console.error('FTS Search Error:', e.message);
-        // Fallback or empty
-        return [];
-    }
+  } catch (e) {
+    console.error('FTS Search Error:', e.message);
+    // Fallback or empty
+    return [];
+  }
 }
 
 export function getStats() {
-    const chatCount = db.prepare('SELECT COUNT(*) as count FROM chats').get().count;
-    const messageCount = db.prepare('SELECT COUNT(*) as count FROM messages').get().count;
-    const latestMessage = db.prepare('SELECT MAX(created_at) as latest FROM messages').get().latest;
-    return { chatCount: Number(chatCount), messageCount: Number(messageCount), latestMessage };
+  const chatCount = db.prepare('SELECT COUNT(*) as count FROM chats').get().count;
+  const messageCount = db.prepare('SELECT COUNT(*) as count FROM messages').get().count;
+  const latestMessage = db.prepare('SELECT MAX(created_at) as latest FROM messages').get().latest;
+  return { chatCount: Number(chatCount), messageCount: Number(messageCount), latestMessage };
 }
 
 export function closeDB() {
-    stmtUpsertChat = null;
-    stmtSelectChat = null;
-    stmtInsertMsg = null;
-    if (db) {
-        db.close();
-        console.log('📦 Database closed');
-    }
+  stmtUpsertChat = null;
+  stmtSelectChat = null;
+  stmtInsertMsg = null;
+  if (db) {
+    db.close();
+    console.log('📦 Database closed');
+  }
 }

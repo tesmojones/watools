@@ -216,7 +216,7 @@
         }
 
         return `${dateHeader}
-          <div class="message ${bubbleClass}">
+          <div class="message ${bubbleClass}" id="msg-${msg.id}">
             <div class="bubble">
               ${!msg.is_outgoing ? `<div class="msg-sender">${escapeHtml(msg.sender || '')}</div>` : ''}
               ${typeIcon && msg.type !== 'image' ? `<span class="msg-type-icon">${typeIcon}</span>` : ''}
@@ -321,7 +321,7 @@
       }
 
       searchResultList.innerHTML = results.map(msg => `
-        <div class="search-result-item" onclick="selectChat(${msg.chat_id}, '${escapeAttr(msg.chat_name)}')">
+        <div class="search-result-item" onclick="selectChat(${msg.chat_id}, '${escapeAttr(msg.chat_name)}', ${msg.id})">
           <div class="search-result-header">
             <span class="search-result-chat">${escapeHtml(msg.chat_name)}</span>
             <span class="search-result-sender">${escapeHtml(msg.sender || '')}</span>
@@ -333,7 +333,7 @@
     }
 
     // ─── Event Handlers ───
-    async function selectChat(chatId, chatName) {
+    async function selectChat(chatId, chatName, targetMsgId) {
       currentChatId = chatId;
       chatTitle.textContent = chatName;
       welcomeScreen.style.display = 'none';
@@ -348,6 +348,16 @@
       const messages = await fetchMessages(chatId);
       chatMeta.textContent = messages.length + ' messages';
       renderMessages(messages);
+
+      // Scroll to specific message if from search result
+      if (targetMsgId) {
+        const targetEl = document.getElementById('msg-' + targetMsgId);
+        if (targetEl) {
+          targetEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          targetEl.classList.add('highlight');
+          setTimeout(() => targetEl.classList.remove('highlight'), 2000);
+        }
+      }
     }
 
     backBtn.addEventListener('click', () => {

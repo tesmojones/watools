@@ -56,21 +56,56 @@ export async function launchBrowser() {
 
             // ─── REMOTE MODE: send to cloud API ───
             if (remoteUrl && apiKey) {
-                const response = await fetch(`${remoteUrl}/api/ingest`, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'Authorization': `Bearer ${apiKey}`,
-                    },
-                    body: JSON.stringify({ chatName, messages }),
-                });
-                const result = await response.json();
-                if (result.success) {
-                    console.log(`☁️ Sent ${result.count} messages to cloud (${chatName})`);
-                } else {
-                    console.error('☁️ Cloud ingest error:', result.error);
+                // Split messages: those with media need individual sends (large payload)
+                const withMedia = messages.filter(m => m.mediaData);
+                const withoutMedia = messages.filter(m => !m.mediaData);
+
+                let totalSent = 0;
+
+                // Send text-only messages in one batch
+                if (withoutMedia.length > 0) {
+                    try {
+                        const resp = await fetch(`${remoteUrl}/api/ingest`, {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json',
+                                'Authorization': `Bearer ${apiKey}`,
+                            },
+                            body: JSON.stringify({ chatName, messages: withoutMedia }),
+                        });
+                        const r = await resp.json();
+                        if (r.success) totalSent += r.count;
+                        else console.error('☁️ Text ingest error:', r.error);
+                    } catch (e) {
+                        console.error('☁️ Text send failed:', e.message);
+                    }
                 }
-                return JSON.stringify(result);
+
+                // Send media messages one by one (large base64 payloads)
+                for (const msg of withMedia) {
+                    try {
+                        const resp = await fetch(`${remoteUrl}/api/ingest`, {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json',
+                                'Authorization': `Bearer ${apiKey}`,
+                            },
+                            body: JSON.stringify({ chatName, messages: [msg] }),
+                        });
+                        const r = await resp.json();
+                        if (r.success) {
+                            totalSent += 1;
+                            console.log(`🖼️☁️ Sent image to cloud`);
+                        } else {
+                            console.error('🖼️☁️ Image ingest error:', r.error);
+                        }
+                    } catch (e) {
+                        console.error('🖼️☁️ Image send failed:', e.message);
+                    }
+                }
+
+                console.log(`☁️ Sent ${totalSent} messages to cloud (${withMedia.length} with images) — ${chatName}`);
+                return JSON.stringify({ success: true, count: totalSent });
             }
 
             // ─── LOCAL MODE: save to local DB ───

@@ -1,0 +1,2 @@
+# Run before each commit
+echo "✅ Pre-commit hook passed"

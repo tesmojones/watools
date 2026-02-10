@@ -442,6 +442,21 @@ body {
 .message {
   display: flex;
   margin-bottom: 4px;
+  transition: background-color 0.3s ease;
+}
+
+.message.highlight {
+  animation: highlightFlash 2s ease;
+}
+
+@keyframes highlightFlash {
+  0% {
+    background-color: rgba(255, 193, 7, 0.3);
+  }
+
+  100% {
+    background-color: transparent;
+  }
 }
 
 .message.bubble-in {
