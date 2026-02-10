@@ -158,6 +158,28 @@ export function startServer(port = 3456) {
         }
     });
 
+    // QR Code Screenshot (for remote scanning in Docker/VPS)
+    app.get('/api/qr', async (req, res) => {
+        try {
+            const { getQRScreenshot } = await import('./browser.js');
+            const screenshot = await getQRScreenshot();
+            res.send(`
+                <html>
+                <head><title>WATools - QR Code</title>
+                <meta http-equiv="refresh" content="3">
+                <style>body{background:#111;display:flex;justify-content:center;align-items:center;min-height:100vh;margin:0;flex-direction:column;font-family:sans-serif;color:#fff}
+                img{max-width:90%;border-radius:8px;box-shadow:0 4px 20px rgba(0,0,0,0.5)}
+                p{margin-top:16px;opacity:0.6;font-size:14px}</style></head>
+                <body>
+                    <img src="data:image/png;base64,${screenshot}" />
+                    <p>🔄 Auto-refreshing every 3 seconds... Scan the QR code with your phone.</p>
+                </body></html>
+            `);
+        } catch (err) {
+            res.status(500).send(`<html><body style="background:#111;color:#fff;font-family:sans-serif;display:flex;justify-content:center;align-items:center;min-height:100vh"><h2>⏳ Browser not ready yet... <br><small style="opacity:0.5">Refresh in a few seconds</small></h2></body></html>`);
+        }
+    });
+
     // Health check
     app.get('/api/health', (req, res) => {
         res.json({ status: 'ok', timestamp: new Date().toISOString() });

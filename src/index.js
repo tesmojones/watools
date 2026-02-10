@@ -19,14 +19,16 @@ async function main() {
     // Start Express server
     await startServer(PORT);
 
-    // Auto-open dashboard in default browser
-    if (!dashboardOnly) {
+    // Auto-open dashboard in default browser (skip in production/Docker)
+    const isProduction = process.env.NODE_ENV === 'production';
+    if (!dashboardOnly && !isProduction) {
         console.log('📊 Opening dashboard in default browser...');
-        // Use 'open' for macOS, 'xdg-open' for Linux if needed, but user is on Mac.
         const startCommand = process.platform === 'darwin' ? 'open' : 'xdg-open';
         exec(`${startCommand} http://localhost:${PORT}`, (err) => {
             if (err) console.error('⚠️ Failed to auto-open dashboard:', err.message);
         });
+    } else if (isProduction) {
+        console.log(`📊 Dashboard available at http://localhost:${PORT}`);
     }
 
     if (dashboardOnly) {

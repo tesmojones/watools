@@ -12,6 +12,8 @@ const USER_DATA_DIR = join(__dirname, '..', 'browser-data');
 // Add stealth plugin to avoid bot detection
 puppeteer.use(StealthPlugin());
 
+const isProduction = process.env.NODE_ENV === 'production';
+
 let browser = null;
 let page = null;
 let injectionInterval = null;
@@ -20,13 +22,15 @@ export async function launchBrowser() {
     console.log('🌐 Launching browser...');
 
     browser = await puppeteer.launch({
-        headless: false,
+        headless: isProduction ? 'new' : false,
         userDataDir: USER_DATA_DIR,
-        defaultViewport: null,
+        defaultViewport: isProduction ? { width: 1280, height: 900 } : null,
         args: [
             '--no-sandbox',
             '--disable-setuid-sandbox',
             '--disable-blink-features=AutomationControlled',
+            '--disable-dev-shm-usage',
+            '--disable-gpu',
             '--window-size=1280,900',
         ],
         ignoreDefaultArgs: ['--enable-automation'],
@@ -214,4 +218,12 @@ export async function triggerManualSync(targetChatName) {
         console.error('Manual sync error:', err);
         throw err;
     }
+}
+
+// Take a screenshot of the current page (useful for scanning QR code remotely)
+export async function getQRScreenshot() {
+    if (!page || page.isClosed()) {
+        throw new Error('Browser not connected');
+    }
+    return await page.screenshot({ encoding: 'base64', type: 'png' });
 }
